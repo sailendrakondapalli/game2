@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-const GAME_SERVER_URL =
+const GAME_SERVER_URL = 
   process.env.EXPO_PUBLIC_GAME_SERVER_URL ||
   (typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.hostname}:3001`
