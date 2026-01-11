@@ -71,6 +71,18 @@ io.on('connection', (socket) => {
     if (result) io.to(match.code).emit('playerShot', result);
   });
 
+  socket.on('changeWeapon', (data) => {
+    const match = matchManager.getPlayerMatch(socket.id);
+    if (!match?.gameManager) return;
+    match.gameManager.changeWeapon(socket.id, data.weapon);
+  });
+
+  socket.on('playerReload', () => {
+    const match = matchManager.getPlayerMatch(socket.id);
+    if (!match?.gameManager) return;
+    match.gameManager.handleReload(socket.id);
+  });
+
   socket.on('disconnect', () => {
     console.log(`🔴 Player disconnected: ${socket.id}`);
     const match = matchManager.leaveMatch(socket.id);
@@ -91,25 +103,35 @@ function startGameLoop(matchCode) {
     const deltaTime = now - lastTime;
     lastTime = now;
 
-    const gameState = match.gameManager.update(deltaTime);
+    const updateResult = match.gameManager.update(deltaTime);
 
-console.log('SERVER gameState:', gameState);
+    io.to(matchCode).emit('gameState', updateResult.gameState);
 
-io.to(matchCode).emit('gameState', gameState);
+    if (updateResult.hits) {
+      updateResult.hits.forEach(hit => {
+        io.to(matchCode).emit('playerHit', { targetId: hit.targetId });
+        if (hit.killed) {
+          io.to(matchCode).emit('playerKilled', {
+            killerId: hit.killerId,
+            killerName: hit.killerName,
+            victimId: hit.victimId,
+            victimName: hit.victimName,
+          });
+        }
+      });
+    }
 
+    if (match.gameManager.started && match.gameManager.playersAlive === 1 && match.gameManager.totalPlayers > 1) {
+      const winner = match.gameManager.getWinner();
+      const results = matchManager.endMatch(matchCode, winner?.playerId);
 
-    // Only end match if game actually started AND someone died
-if (match.gameManager.started && match.gameManager.playersAlive === 1 && match.gameManager.totalPlayers > 1) {
-  const winner = match.gameManager.getWinner();
-  const results = matchManager.endMatch(matchCode, winner?.playerId);
+      io.to(matchCode).emit('matchEnd', {
+        winner,
+        results,
+      });
 
-  io.to(matchCode).emit('matchEnd', {
-    winner,
-    results,
-  });
-
-  stopGameLoop(matchCode);
-}
+      stopGameLoop(matchCode);
+    }
 
   }, 1000 / config.TICK_RATE);
 

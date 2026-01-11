@@ -157,13 +157,33 @@ class GameManager {
   }
 
   update(deltaTime) {
-    this.updateBullets(deltaTime);
-    this.checkSafeZone();
-    return this.getGameState();
+    const hits = this.updateBullets(deltaTime);
+    const zoneDeaths = this.checkSafeZone();
+
+    const allHits = [];
+    if (hits && hits.length > 0) allHits.push(...hits);
+    if (zoneDeaths && zoneDeaths.length > 0) {
+      zoneDeaths.forEach(death => {
+        allHits.push({
+          targetId: death.victimId,
+          killed: true,
+          victimId: death.victimId,
+          victimName: death.victimName,
+          killerId: null,
+          killerName: 'Safe Zone',
+        });
+      });
+    }
+
+    return {
+      gameState: this.getGameState(),
+      hits: allHits.length > 0 ? allHits : null,
+    };
   }
 
   updateBullets(deltaTime) {
     const dt = deltaTime / 1000;
+    const hits = [];
 
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const bullet = this.bullets[i];
@@ -193,12 +213,24 @@ class GameManager {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance < 20) {
-          this.handleHit(socketId, bullet);
+          const hitResult = this.handleHit(socketId, bullet);
+          if (hitResult) {
+            hits.push({
+              targetId: socketId,
+              killed: hitResult.killed,
+              killerId: hitResult.killerId,
+              killerName: hitResult.killerName,
+              victimId: hitResult.victimId,
+              victimName: hitResult.victimName,
+            });
+          }
           this.bullets.splice(i, 1);
           break;
         }
       }
     }
+
+    return hits.length > 0 ? hits : null;
   }
 
   handleHit(targetSocketId, bullet) {
@@ -231,6 +263,7 @@ class GameManager {
       }
 
       return {
+        killed: true,
         killerId: bullet.ownerId,
         killerName: attacker ? attacker.username : 'Unknown',
         victimId: targetSocketId,
@@ -238,7 +271,13 @@ class GameManager {
       };
     }
 
-    return null;
+    return {
+      killed: false,
+      killerId: bullet.ownerId,
+      killerName: attacker ? attacker.username : 'Unknown',
+      victimId: targetSocketId,
+      victimName: target.username,
+    };
   }
 
   checkSafeZone() {
@@ -315,6 +354,9 @@ class GameManager {
         armor: player.armor,
         isAlive: player.isAlive,
         weapon: player.weapon,
+        ammo: player.ammo,
+        maxAmmo: player.maxAmmo,
+        isReloading: player.isReloading,
         kills: player.kills,
       });
     }
