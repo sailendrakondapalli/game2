@@ -1,11 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-const GAME_SERVER_URL = 
-  process.env.EXPO_PUBLIC_GAME_SERVER_URL ||
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
+const GAME_SERVER_URL = process.env.EXPO_PUBLIC_GAME_SERVER_URL || 'http://192.168.29.45:3001';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -27,17 +23,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on('connect', () => {
-      console.log('🟢 Connected to game server:', newSocket.id);
+      console.log('Connected to game server');
       setConnected(true);
     });
 
     newSocket.on('disconnect', () => {
-      console.log('🔴 Disconnected from game server');
+      console.log('Disconnected from game server');
       setConnected(false);
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.error('❌ Socket connection error:', err.message);
     });
 
     setSocket(newSocket);
@@ -56,7 +48,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
 export function useSocket() {
   const context = useContext(SocketContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useSocket must be used within a SocketProvider');
   }
   return context;
