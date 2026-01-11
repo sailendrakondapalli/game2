@@ -1,0 +1,130 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const MatchManager = require('./matchManager');
+const config = require('./config');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+});
+
+app.use(cors());
+app.use(express.json());
+
+const matchManager = new MatchManager();
+const gameLoops = new Map();
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', matches: matchManager.matches.size });
+});
+
+app.get('/matches', (req, res) => {
+  res.json({ matches: matchManager.getActiveMatches() });
+});
+
+io.on('connection', (socket) => {
+  console.log(`🟢 Player connected: ${socket.id}`);
+
+  // QUICK MATCH
+  socket.on('quickMatch', (playerData) => {
+    if (!playerData?.playerId || !playerData?.username) {
+      socket.emit('matchError', { error: 'Invalid player data' });
+      console.log('🔥 quickMatch received:', playerData);
+      return;
+    }
+
+    console.log(`🎮 Quick match request from ${playerData.username}`);
+
+    const result = matchManager.findQuickMatch(socket.id, playerData);
+
+    if (!result.success) {
+      socket.emit('matchError', { error: result.error });
+      return;
+    }
+
+    socket.join(result.match.code);
+    io.to(result.match.code).emit('matchUpdate', result.match);
+
+    const match = matchManager.getMatch(result.match.code);
+
+    if (match.status === 'waiting') {
+      console.log(`🚀 Starting match ${match.code}`);
+      matchManager.startMatch(match.code);
+      startGameLoop(match.code);
+      io.to(match.code).emit('matchStart', { matchCode: match.code });
+    }
+  });
+
+  socket.on('playerMove', (data) => {
+    const match = matchManager.getPlayerMatch(socket.id);
+    if (!match?.gameManager) return;
+    match.gameManager.updatePlayer(socket.id, data);
+  });
+
+  socket.on('playerShoot', (data) => {
+    const match = matchManager.getPlayerMatch(socket.id);
+    if (!match?.gameManager) return;
+    const result = match.gameManager.handleShoot(socket.id, data);
+    if (result) io.to(match.code).emit('playerShot', result);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`🔴 Player disconnected: ${socket.id}`);
+    const match = matchManager.leaveMatch(socket.id);
+    if (match && match.players.size === 0) stopGameLoop(match.code);
+  });
+});
+
+function startGameLoop(matchCode) {
+  if (gameLoops.has(matchCode)) return;
+
+  const match = matchManager.getMatch(matchCode);
+  if (!match?.gameManager) return;
+
+  let lastTime = Date.now();
+
+  const loop = setInterval(() => {
+    const now = Date.now();
+    const deltaTime = now - lastTime;
+    lastTime = now;
+
+    const gameState = match.gameManager.update(deltaTime);
+
+console.log('SERVER gameState:', gameState);
+
+io.to(matchCode).emit('gameState', gameState);
+
+
+    // Only end match if game actually started AND someone died
+if (match.gameManager.started && match.gameManager.playersAlive === 1 && match.gameManager.totalPlayers > 1) {
+  const winner = match.gameManager.getWinner();
+  const results = matchManager.endMatch(matchCode, winner?.playerId);
+
+  io.to(matchCode).emit('matchEnd', {
+    winner,
+    results,
+  });
+
+  stopGameLoop(matchCode);
+}
+
+  }, 1000 / config.TICK_RATE);
+
+  gameLoops.set(matchCode, loop);
+}
+
+function stopGameLoop(matchCode) {
+  const loop = gameLoops.get(matchCode);
+  if (loop) {
+    clearInterval(loop);
+    gameLoops.delete(matchCode);
+  }
+}
+
+server.listen(config.PORT, '0.0.0.0', () => {
+  console.log(`✅ Game server running on port ${config.PORT}`);
+  console.log(`⏱ Tick rate: ${config.TICK_RATE} Hz`);
+});
